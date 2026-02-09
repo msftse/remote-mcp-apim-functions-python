@@ -1,11 +1,13 @@
 <!--
     JIRA MCP API POLICY
     This policy applies to all operations in the Jira MCP API.
-    Validates the OAuth Bearer token, decrypts the session key, and checks the cached Entra token.
+    OAuth auth is DISABLED for agent/demo access.
+    To re-enable, uncomment the auth block below.
 -->
 <policies>
     <inbound>
         <base />
+        <!-- OAuth auth disabled for agent access
         <check-header name="Authorization" failed-check-httpcode="401" failed-check-error-message="Not authorized" ignore-case="false" />
         <set-variable name="IV" value="{{EncryptionIV}}" />
         <set-variable name="key" value="{{EncryptionKey}}" />
@@ -29,6 +31,7 @@
                 </return-response>
             </when>
         </choose>
+        -->
         <set-header name="x-functions-key" exists-action="delete" />
     </inbound>
     <backend>
