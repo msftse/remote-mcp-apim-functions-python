@@ -1,7 +1,7 @@
 <!--
 ---
 name: Remote MCP  using Azure API Management
-description: Use Azure API Management as the AI Gateway for MCP Servers using Azure Functions  
+description: Use Azure API Management as the AI Gateway for multiple MCP Servers using Azure Functions and Container Apps
 page_type: sample
 languages:
 - python
@@ -10,6 +10,7 @@ languages:
 products:
 - azure-api-management
 - azure-functions
+- azure-container-apps
 - azure
 urlFragment: remote-mcp-apim-functions-python
 ---
@@ -19,19 +20,49 @@ urlFragment: remote-mcp-apim-functions-python
 
 ![Diagram](mcp-client-authorization.gif)
 
-Azure API Management acts as the [AI Gateway](https://github.com/Azure-Samples/AI-Gateway) for MCP servers. 
+Azure API Management acts as the [AI Gateway](https://github.com/Azure-Samples/AI-Gateway) for MCP servers.
 
-This sample implements the latest [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization#2-10-third-party-authorization-flow)
+This sample implements the latest [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization#2-10-third-party-authorization-flow) and demonstrates how to route multiple MCP server backends through a single APIM gateway with unified OAuth 2.0 authentication.
 
 This is a [sequence diagram](infra/app/apim-oauth/diagrams/diagrams.md) to understand the flow.
 
+## MCP Server Backends
+
+This sample deploys three MCP server backends behind the APIM gateway:
+
+| Backend | Compute | APIM Path | Description |
+|---|---|---|---|
+| **MCP Functions** | Azure Functions (Python) | `/mcp/sse` | Sample tools (`hello_mcp`, `get_snippet`, `save_snippet`) |
+| **Slack MCP** | Azure Container App | `/slack-mcp/sse` | Slack workspace integration via [slack-mcp-server](https://github.com/korotovsky/slack-mcp-server) |
+| **Jira MCP** | Azure Container App | `/jira-mcp/sse` | Jira/Atlassian integration via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) |
+
+All backends share the same OAuth 2.0 authorization flow managed by APIM. MCP clients authenticate once and can access any backend.
+
 ## Deploy Remote MCP Server to Azure
+
+### Prerequisites
 
 1. Register `Microsoft.App` resource provider.
     * If you are using Azure CLI, run `az provider register --namespace Microsoft.App --wait`.
     * If you are using Azure PowerShell, run `Register-AzResourceProvider -ProviderNamespace Microsoft.App`. Then run `(Get-AzResourceProvider -ProviderNamespace Microsoft.App).RegistrationState` after some time to check if the registration is complete.
 
-2. Run this [azd](https://aka.ms/azd) command to provision the api management service, function app(with code) and all other required Azure resources
+2. Set the required environment variables for the additional MCP server backends:
+
+    ```shell
+    # Slack MCP Server
+    azd env set SLACK_BOT_TOKEN <your-slack-bot-token>
+
+    # Jira MCP Server
+    azd env set JIRA_URL <your-jira-instance-url>         # e.g. https://yourorg.atlassian.net
+    azd env set JIRA_USERNAME <your-jira-email>
+    azd env set JIRA_API_TOKEN <your-jira-api-token>
+    ```
+
+    To obtain these credentials:
+    - **Slack**: Create a Slack App at [api.slack.com](https://api.slack.com/apps), add the required Bot Token Scopes, and install it to your workspace to get the `xoxb-` bot token.
+    - **Jira**: Generate an API token at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens).
+
+3. Run this [azd](https://aka.ms/azd) command to provision all Azure resources and deploy the code:
 
     ```shell
     azd up
@@ -47,18 +78,27 @@ This is a [sequence diagram](infra/app/apim-oauth/diagrams/diagrams.md) to under
 
 1. CTRL click to load the MCP Inspector web app from the URL displayed by the app (e.g. http://127.0.0.1:6274/#resources)
 1. Set the transport type to `SSE`
-1. Set the URL to your running API Management SSE endpoint displayed after `azd up` and **Connect**:
+1. Set the URL to one of the running API Management SSE endpoints displayed after `azd up` and **Connect**:
 
-    ```shell
-    https://<apim-servicename-from-azd-output>.azure-api.net/mcp/sse
+    ```
+    https://<apim-servicename>.azure-api.net/mcp/sse        # MCP Functions
+    https://<apim-servicename>.azure-api.net/slack-mcp/sse   # Slack MCP
+    https://<apim-servicename>.azure-api.net/jira-mcp/sse    # Jira MCP
     ```
 
-5. **List Tools**.  Click on a tool and **Run Tool**.  
+5. **List Tools**.  Click on a tool and **Run Tool**.
+
+> **Note**: MCP Inspector's web UI will auto-discover the OAuth metadata at `/.well-known/oauth-authorization-server` and initiate the OAuth flow. You can also test directly using CLI mode:
+> ```shell
+> npx @modelcontextprotocol/inspector --cli --transport sse \
+>   --server-url "https://<apim-servicename>.azure-api.net/jira-mcp/sse" \
+>   --method tools/list
+> ```
 
 
 ## Technical Architecture Overview
 
-This solution deploys a secure MCP (Model Context Protocol) server infrastructure on Azure. The architecture implements a multi-layered security model with Azure API Management serving as an intelligent gateway that handles authentication, authorization, and request routing.
+This solution deploys a secure MCP (Model Context Protocol) server infrastructure on Azure. The architecture implements a multi-layered security model with Azure API Management serving as an intelligent gateway that handles authentication, authorization, and request routing to multiple MCP server backends.
 
 ![overview diagram](overview.png)
 
@@ -67,22 +107,31 @@ This solution deploys a secure MCP (Model Context Protocol) server infrastructur
 The infrastructure provisions the following Azure resources:
 
 #### Core Gateway Infrastructure
-- **Azure API Management (APIM)** - The central security gateway that exposes both OAuth and MCP APIs
+- **Azure API Management (APIM)** - The central security gateway that exposes OAuth and multiple MCP APIs
   - **SKU**: BasicV2 (configurable)
   - **Identity**: System-assigned and user-assigned managed identities
   - **Purpose**: Handles authentication flows, request validation, and secure proxying to backend services
 
 #### Backend Compute
-- **Azure Function App** - Hosts the MCP server implementation
+- **Azure Function App** - Hosts the original MCP server implementation
   - **Runtime**: Python 3.11 on Flex Consumption plan
   - **Authentication**: Function-level authentication with managed identity integration
   - **Purpose**: Executes MCP tools and operations (snippet management in this example)
+
+- **Azure Container Apps** - Host additional MCP server backends
+  - **Slack MCP Container App** - Runs [slack-mcp-server](https://github.com/korotovsky/slack-mcp-server) for Slack workspace integration
+  - **Jira MCP Container App** - Runs [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) for Jira/Atlassian integration
+  - **Resources**: 0.25 vCPU, 0.5 Gi memory per container
+  - **Scaling**: Each container runs in its own Container Apps Environment with Log Analytics integration
+  - **Purpose**: Enables third-party MCP servers to be deployed as containers behind the APIM gateway
 
 #### Storage and Data
 - **Azure Storage Account** - Provides multiple storage functions
   - **Function hosting**: Stores function app deployment packages
   - **Application data**: Blob container for snippet storage
   - **Security**: Configured with managed identity access and optional private endpoints
+
+- **Azure Cosmos DB** (Serverless) - Stores OAuth dynamic client registrations
 
 #### Security and Identity
 - **User-Assigned Managed Identity** - Enables secure service-to-service authentication
@@ -92,10 +141,11 @@ The infrastructure provisions the following Azure resources:
 - **Entra ID Application Registration** - OAuth2/OpenID Connect client for authentication
   - **Purpose**: Enables third-party authorization flow per MCP specification
   - **Configuration**: PKCE-enabled public client with custom redirect URIs
+  - **Scopes**: Only requests the `openid` scope (no admin consent required)
 
 #### Monitoring and Observability
 - **Application Insights** - Provides telemetry and monitoring
-- **Log Analytics Workspace** - Centralized logging and analytics
+- **Log Analytics Workspace** - Centralized logging and analytics for Functions and Container Apps
 
 #### Optional Network Security
 - **Virtual Network (VNet)** - When `vnetEnabled` is true
@@ -110,12 +160,19 @@ The infrastructure provisions the following Azure resources:
 - Request validation and header injection
 - Rate limiting and throttling capabilities
 - Centralized policy management
+- Unified authentication across multiple MCP backends
 
 **Azure Functions** provides:
 - Serverless, pay-per-use compute model
 - Native integration with Azure services
 - Automatic scaling based on demand
 - Built-in monitoring and diagnostics
+
+**Azure Container Apps** provides:
+- Flexible hosting for third-party MCP server images
+- Simple deployment from container registries (e.g. GHCR)
+- Per-container environment variable and secret management
+- Integrated logging via Log Analytics
 
 **Managed Identities** eliminate the need for:
 - Service credentials management
@@ -124,9 +181,9 @@ The infrastructure provisions the following Azure resources:
 
 ## Azure API Management Configuration Details
 
-The APIM instance is configured with two primary APIs that work together to implement the MCP authorization specification:
+The APIM instance is configured with four APIs that work together to implement the MCP authorization specification and route requests to multiple backends:
 
-### OAuth API (`/oauth/*`)
+### OAuth API (`/`)
 
 This API implements the complete OAuth 2.0 authorization server functionality required by the MCP specification:
 
@@ -152,12 +209,13 @@ This API implements the complete OAuth 2.0 authorization server functionality re
   
 **Client Registration** (`POST /register`)
 - **Purpose**: Supports dynamic client registration per MCP specification
+- **Storage**: Client registrations are persisted in Cosmos DB
 
 **Token Endpoint** (`POST /token`)
 - **Purpose**: Exchanges authorization codes for access tokens
 - **Policy Logic**:
   1. Validates authorization code and PKCE verifier from MCP client
-  2. Exchanges Entra ID authorization code for access tokens
+  2. Exchanges Entra ID authorization code for access tokens (using `openid` scope only)
   3. Generates encrypted session key for MCP API access
   4. Caches the access token with session key mapping
   5. Returns encrypted session key to MCP client
@@ -168,26 +226,53 @@ The OAuth API uses several APIM Named Values for configuration:
 - `McpClientId` - The registered Entra ID application client ID
 - `EntraIDFicClientId` - Service identity client ID for token exchange
 - `APIMGatewayURL` - Base URL for callback and metadata endpoints
-- `OAuthScopes` - Requested OAuth scopes (`openid` + Microsoft Graph)
+- `OAuthScopes` - Requested OAuth scopes (`openid` only -- no admin consent required)
 - `EncryptionKey` / `EncryptionIV` - For session key encryption
 
 ### MCP API (`/mcp/*`)
 
-This API provides the actual MCP protocol endpoints with security enforcement:
+This API provides the original MCP protocol endpoints backed by Azure Functions:
 
 #### Endpoints and Operations
 
-**Server-Sent Events Endpoint** (`GET /sse`)
+**Server-Sent Events Endpoint** (`GET /mcp/sse`)
 - **Purpose**: Establishes real-time communication channel for MCP protocol
 - **Security**: Requires valid encrypted session token
 
-**Message Endpoint** (`POST /message`)
+**Message Endpoint** (`POST /mcp/message`)
 - **Purpose**: Handles MCP protocol messages and tool invocations
 - **Security**: Requires valid encrypted session token
+- **Backend**: Proxies to Azure Functions with `x-functions-key` header injection
 
-#### Security Policy Implementation
+### Slack MCP API (`/slack-mcp/*`)
 
-The MCP API applies a comprehensive security policy to all operations:
+This API proxies requests to the Slack MCP Server running on Azure Container Apps:
+
+**Server-Sent Events Endpoint** (`GET /slack-mcp/sse`)
+- **Purpose**: Establishes SSE connection to the Slack MCP server
+
+**Message Endpoint** (`POST /slack-mcp/message`)
+- **Purpose**: Sends messages to the Slack MCP server
+
+The policy rewrites SSE response URLs to include the `/slack-mcp/` prefix so that clients send follow-up messages through APIM rather than directly to the container.
+
+### Jira MCP API (`/jira-mcp/*`)
+
+This API proxies requests to the Jira/Atlassian MCP Server running on Azure Container Apps:
+
+**Server-Sent Events Endpoint** (`GET /jira-mcp/sse`)
+- **Purpose**: Establishes SSE connection to the Jira MCP server
+
+**Message Endpoint** (`POST /jira-mcp/messages/`)
+- **Purpose**: Sends messages to the Jira MCP server
+
+The policy rewrites SSE response URLs to include the `/jira-mcp/` prefix for correct APIM routing.
+
+> **Note**: The Jira MCP server uses `/messages/?session_id=` (plural, with underscore) unlike the Slack MCP server which uses `/message?sessionId=` (singular, camelCase). Each API policy handles the URL rewriting accordingly.
+
+### Security Policy Implementation
+
+All MCP APIs (MCP Functions, Slack, Jira) share the same security policy pattern:
 
 1. **Authorization Header Validation**
    ```xml
@@ -210,7 +295,7 @@ The MCP API applies a comprehensive security policy to all operations:
    - Verifies cached access token exists and is valid
    - Returns 401 with proper WWW-Authenticate header if invalid
 
-5. **Backend Authentication**
+5. **Backend Authentication** (MCP Functions only)
    ```xml
    <set-header name="x-functions-key" exists-action="override">
        <value>{{function-host-key}}</value>
@@ -219,12 +304,13 @@ The MCP API applies a comprehensive security policy to all operations:
 
 ### Security Model
 
-The solution implements a sophisticated multi-layer security model:
+The solution implements a multi-layer security model:
 
 **Layer 1: OAuth 2.0/PKCE Authentication**
 - MCP clients must complete full OAuth flow with Entra ID
 - PKCE prevents authorization code interception attacks
 - User consent management with persistent preferences
+- Only the `openid` scope is requested (no admin consent required)
 
 **Layer 2: Session Key Encryption**
 - Access tokens are never exposed to MCP clients
@@ -243,5 +329,22 @@ The solution implements a sophisticated multi-layer security model:
 
 This layered approach ensures that even if one security boundary is compromised, multiple additional protections remain in place.
 
+## Adding a New MCP Server Backend
 
+The architecture is designed to be extensible. To add a new MCP server backend:
 
+1. **Create the APIM API definition**: Add a new directory `infra/app/apim-<name>/` with:
+   - `<name>-api.bicep` - API definition with SSE and message operations
+   - `<name>-api.policy.xml` - Policy with OAuth validation and URL rewriting
+
+2. **Add the Container App module** in `infra/main.bicep`:
+   - Reference the reusable `infra/core/host/container-app.bicep` module
+   - Configure the container image, port, command, args, secrets, and environment variables
+
+3. **Add the APIM API module** in `infra/main.bicep`:
+   - Reference the new bicep module from step 1
+   - Pass the APIM service name and container app FQDN
+
+4. **Add parameters** in `infra/main.bicep` and `infra/main.parameters.json` for any credentials or configuration values needed by the new backend.
+
+5. **Set environment variables** via `azd env set` for any secrets before running `azd up`.

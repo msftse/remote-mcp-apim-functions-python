@@ -1,13 +1,11 @@
 <!--
     JIRA MCP API POLICY
     This policy applies to all operations in the Jira MCP API.
-    TEMPORARILY MODIFIED: OAuth auth bypassed for testing.
-    TODO: Restore full OAuth validation after admin consent is granted.
+    Validates the OAuth Bearer token, decrypts the session key, and checks the cached Entra token.
 -->
 <policies>
     <inbound>
         <base />
-        <!-- OAuth validation temporarily disabled for testing
         <check-header name="Authorization" failed-check-httpcode="401" failed-check-error-message="Not authorized" ignore-case="false" />
         <set-variable name="IV" value="{{EncryptionIV}}" />
         <set-variable name="key" value="{{EncryptionKey}}" />
@@ -31,7 +29,6 @@
                 </return-response>
             </when>
         </choose>
-        -->
         <set-header name="x-functions-key" exists-action="delete" />
     </inbound>
     <backend>

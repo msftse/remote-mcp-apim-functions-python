@@ -44,7 +44,7 @@ param jiraUsername string = ''
 
 // MCP Client APIM gateway specific variables
 
-var oauth_scopes = 'openid https://graph.microsoft.com/.default'
+var oauth_scopes = 'openid'
 
 
 var abbrs = loadJsonContent('./abbreviations.json')
