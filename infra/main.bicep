@@ -28,6 +28,20 @@ param mcpEntraApplicationDisplayName string = ''
 param mcpEntraApplicationUniqueName string = ''
 param disableLocalAuth bool = true
 
+@description('Slack bot token for the Slack MCP Server')
+@secure()
+param slackBotToken string = ''
+
+@description('Jira API token for the Jira MCP Server')
+@secure()
+param jiraApiToken string = ''
+
+@description('Jira URL for the Jira MCP Server')
+param jiraUrl string = ''
+
+@description('Jira username (email) for the Jira MCP Server')
+param jiraUsername string = ''
+
 // MCP Client APIM gateway specific variables
 
 var oauth_scopes = 'openid https://graph.microsoft.com/.default'
@@ -111,6 +125,112 @@ module mcpApiModule './app/apim-mcp/mcp-api.bicep' = {
   }
   dependsOn: [
     api
+    oauthAPIModule
+  ]
+}
+
+// Slack MCP Server - Container App
+var slackMcpContainerAppName = '${abbrs.appContainerApps}slack-mcp-${resourceToken}'
+var slackMcpContainerAppEnvName = '${abbrs.appManagedEnvironments}slack-mcp-${resourceToken}'
+
+module slackMcpContainerApp './core/host/container-app.bicep' = {
+  name: 'slackMcpContainerApp'
+  scope: rg
+  params: {
+    containerAppName: slackMcpContainerAppName
+    containerAppEnvName: slackMcpContainerAppEnvName
+    location: location
+    tags: tags
+    containerImage: 'ghcr.io/korotovsky/slack-mcp-server:latest'
+    targetPort: 3001
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    command: ['mcp-server']
+    args: ['--transport', 'sse']
+    secrets: [
+      {
+        name: 'slack-bot-token'
+        value: slackBotToken
+      }
+    ]
+    envVars: [
+      {
+        name: 'SLACK_MCP_XOXB_TOKEN'
+        secretRef: 'slack-bot-token'
+      }
+      {
+        name: 'SLACK_MCP_HOST'
+        value: '0.0.0.0'
+      }
+      {
+        name: 'SLACK_MCP_PORT'
+        value: '3001'
+      }
+    ]
+  }
+}
+
+// Slack MCP APIM API definition
+module slackMcpApiModule './app/apim-slack-mcp/slack-mcp-api.bicep' = {
+  name: 'slackMcpApiModule'
+  scope: rg
+  params: {
+    apimServiceName: apimService.name
+    slackMcpFqdn: slackMcpContainerApp.outputs.fqdn
+  }
+  dependsOn: [
+    oauthAPIModule
+  ]
+}
+
+// Jira MCP Server - Container App
+var jiraMcpContainerAppName = '${abbrs.appContainerApps}jira-mcp-${resourceToken}'
+var jiraMcpContainerAppEnvName = '${abbrs.appManagedEnvironments}jira-mcp-${resourceToken}'
+
+module jiraMcpContainerApp './core/host/container-app.bicep' = {
+  name: 'jiraMcpContainerApp'
+  scope: rg
+  params: {
+    containerAppName: jiraMcpContainerAppName
+    containerAppEnvName: jiraMcpContainerAppEnvName
+    location: location
+    tags: tags
+    containerImage: 'ghcr.io/sooperset/mcp-atlassian:latest'
+    targetPort: 9000
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    command: ['mcp-atlassian']
+    args: ['--transport', 'sse', '--port', '9000', '-vv']
+    secrets: [
+      {
+        name: 'jira-api-token'
+        value: jiraApiToken
+      }
+    ]
+    envVars: [
+      {
+        name: 'JIRA_URL'
+        value: jiraUrl
+      }
+      {
+        name: 'JIRA_USERNAME'
+        value: jiraUsername
+      }
+      {
+        name: 'JIRA_API_TOKEN'
+        secretRef: 'jira-api-token'
+      }
+    ]
+  }
+}
+
+// Jira MCP APIM API definition
+module jiraMcpApiModule './app/apim-jira-mcp/jira-mcp-api.bicep' = {
+  name: 'jiraMcpApiModule'
+  scope: rg
+  params: {
+    apimServiceName: apimService.name
+    jiraMcpFqdn: jiraMcpContainerApp.outputs.fqdn
+  }
+  dependsOn: [
     oauthAPIModule
   ]
 }
@@ -261,4 +381,6 @@ output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
 output SERVICE_API_NAME string = api.outputs.SERVICE_API_NAME
 output AZURE_FUNCTION_NAME string = api.outputs.SERVICE_API_NAME
-output SERVICE_API_ENDPOINTS array = [ '${apimService.outputs.gatewayUrl}/mcp/sse' ]
+output SERVICE_API_ENDPOINTS array = [ '${apimService.outputs.gatewayUrl}/mcp/sse', '${apimService.outputs.gatewayUrl}/slack-mcp/sse', '${apimService.outputs.gatewayUrl}/jira-mcp/sse' ]
+output SLACK_MCP_CONTAINER_APP_FQDN string = slackMcpContainerApp.outputs.fqdn
+output JIRA_MCP_CONTAINER_APP_FQDN string = jiraMcpContainerApp.outputs.fqdn

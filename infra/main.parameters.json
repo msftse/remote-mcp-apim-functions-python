@@ -13,6 +13,18 @@
     },
     "apimSku": {
       "value": "Basicv2" 
+    },
+    "slackBotToken": {
+      "value": "${SLACK_BOT_TOKEN}"
+    },
+    "jiraApiToken": {
+      "value": "${JIRA_API_TOKEN}"
+    },
+    "jiraUrl": {
+      "value": "${JIRA_URL}"
+    },
+    "jiraUsername": {
+      "value": "${JIRA_USERNAME}"
     }
   }
 }

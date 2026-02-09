@@ -1,7 +1,8 @@
 <!--
-    MCP API POLICY
-    This policy applies to all operations in the MCP API.
+    SLACK MCP API POLICY
+    This policy applies to all operations in the Slack MCP API.
     Validates the OAuth Bearer token, decrypts the session key, and checks the cached Entra token.
+    It also rewrites the SSE message endpoint path to include the APIM path prefix.
 -->
 <policies>
     <inbound>
@@ -29,15 +30,15 @@
                 </return-response>
             </when>
         </choose>
-        <set-header name="x-functions-key" exists-action="override">
-            <value>{{function-host-key}}</value>
-        </set-header>
+        <set-header name="x-functions-key" exists-action="delete" />
     </inbound>
     <backend>
         <base />
     </backend>
     <outbound>
         <base />
+        <!-- Rewrite the SSE endpoint URL to include the APIM path prefix -->
+        <find-and-replace from="/message?sessionId=" to="/slack-mcp/message?sessionId=" />
     </outbound>
     <on-error>
         <base />
