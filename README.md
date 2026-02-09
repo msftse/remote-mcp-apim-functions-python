@@ -18,6 +18,10 @@ urlFragment: remote-mcp-apim-functions-python
 
 # Secure Remote MCP Servers using Azure API Management (Experimental)
 
+[![Deploy with azd](https://img.shields.io/static/v1?style=for-the-badge&label=azd&message=Deploy+to+Azure&color=blue&logo=microsoft-azure)](https://github.com/Azure-Samples/remote-mcp-apim-functions-python#deploy-to-azure)
+[![Open in GitHub Codespaces](https://img.shields.io/static/v1?style=for-the-badge&label=GitHub+Codespaces&message=Open&color=brightgreen&logo=github)](https://codespaces.new/Azure-Samples/remote-mcp-apim-functions-python)
+[![Open in Dev Container](https://img.shields.io/static/v1?style=for-the-badge&label=Dev+Containers&message=Open&color=blue&logo=visualstudiocode)](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/Azure-Samples/remote-mcp-apim-functions-python)
+
 ![Diagram](mcp-client-authorization.gif)
 
 Azure API Management acts as the [AI Gateway](https://github.com/Azure-Samples/AI-Gateway) for MCP servers.
