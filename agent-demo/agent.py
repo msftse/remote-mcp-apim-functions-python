@@ -1,16 +1,3 @@
-"""
-AI Foundry Agent with Multiple MCP Server Tools
-
-Creates an Azure AI Foundry agent that connects to multiple MCP server
-backends exposed through the APIM gateway and directly:
-  - MCP Functions (/mcp/sse) - sample tools (hello, snippets)
-  - Slack MCP (/slack-mcp/sse) - Slack workspace integration
-  - Jira MCP (/jira-mcp/sse) - Jira/Atlassian integration
-  - GitHub MCP (api.githubcopilot.com) - GitHub repos, issues, PRs
-
-Uses the new Foundry Agent SDK v2 (PromptAgentDefinition + OpenAI Responses API).
-"""
-
 import os
 import json
 import sys
