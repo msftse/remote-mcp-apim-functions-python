@@ -28,73 +28,213 @@ This is a [sequence diagram](infra/app/apim-oauth/diagrams/diagrams.md) to under
 
 ## MCP Server Backends
 
-This sample deploys three MCP server backends behind the APIM gateway:
+This sample deploys three MCP server backends behind the APIM gateway, plus a fourth remote-hosted backend:
 
 | Backend | Compute | APIM Path | Description |
 |---|---|---|---|
 | **MCP Functions** | Azure Functions (Python) | `/mcp/sse` | Sample tools (`hello_mcp`, `get_snippet`, `save_snippet`) |
 | **Slack MCP** | Azure Container App | `/slack-mcp/sse` | Slack workspace integration via [slack-mcp-server](https://github.com/korotovsky/slack-mcp-server) |
 | **Jira MCP** | Azure Container App | `/jira-mcp/sse` | Jira/Atlassian integration via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) |
+| **GitHub MCP** | GitHub-hosted (remote) | N/A | GitHub integration via [GitHub Copilot MCP](https://api.githubcopilot.com/mcp/) — no APIM proxy needed |
 
-All backends share the same OAuth 2.0 authorization flow managed by APIM. MCP clients authenticate once and can access any backend.
+All APIM-proxied backends share the same OAuth 2.0 authorization flow managed by APIM. MCP clients authenticate once and can access any backend.
 
-## Deploy Remote MCP Server to Azure
+The repo also includes an **AI Foundry Agent Demo** (`agent-demo/`) that connects all four MCP backends to a single conversational agent. See [Agent Demo](#agent-demo) below.
 
-### Prerequisites
+---
 
-1. Register `Microsoft.App` resource provider.
-    * If you are using Azure CLI, run `az provider register --namespace Microsoft.App --wait`.
-    * If you are using Azure PowerShell, run `Register-AzResourceProvider -ProviderNamespace Microsoft.App`. Then run `(Get-AzResourceProvider -ProviderNamespace Microsoft.App).RegistrationState` after some time to check if the registration is complete.
+## Prerequisites
 
-2. Set the required environment variables for the additional MCP server backends:
+Before deploying, you need the following accounts, credentials, and tooling.
 
-    ```shell
-    # Slack MCP Server
-    azd env set SLACK_BOT_TOKEN <your-slack-bot-token>
+### Required Tooling
 
-    # Jira MCP Server
-    azd env set JIRA_URL <your-jira-instance-url>         # e.g. https://yourorg.atlassian.net
-    azd env set JIRA_USERNAME <your-jira-email>
-    azd env set JIRA_API_TOKEN <your-jira-api-token>
-    ```
+- [Azure Developer CLI (`azd`)](https://aka.ms/azd) v1.5+
+- [Azure CLI (`az`)](https://learn.microsoft.com/cli/azure/install-azure-cli)
+- An Azure subscription with **Contributor** access
+- Python 3.10+
 
-    To obtain these credentials:
-    - **Slack**: Create a Slack App at [api.slack.com](https://api.slack.com/apps), add the required Bot Token Scopes, and install it to your workspace to get the `xoxb-` bot token.
-    - **Jira**: Generate an API token at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens).
+### Slack Bot Token
 
-3. Run this [azd](https://aka.ms/azd) command to provision all Azure resources and deploy the code:
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** → **From scratch**.
+2. Under **OAuth & Permissions**, add the following **Bot Token Scopes**:
+   - `channels:history`, `channels:read`, `chat:write`, `groups:history`, `groups:read`
+   - `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`
+3. Click **Install to Workspace** and authorize.
+4. Copy the **Bot User OAuth Token** (starts with `xoxb-`).
 
-    ```shell
-    azd up
-    ```
+### Jira API Token
 
-### Test with MCP Inspector
+1. Go to [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens).
+2. Click **Create API token**, give it a label, and copy the token.
+3. Note your Jira instance URL (e.g. `https://yourorg.atlassian.net`) and the email address you log in with.
 
-1. In a **new terminal window**, install and run MCP Inspector
+### GitHub Personal Access Token (for Agent Demo only)
+
+If you plan to use the Agent Demo with GitHub tools:
+
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) → **Generate new token (classic)** or **Fine-grained token**.
+2. Grant scopes for the operations you need (e.g. `repo`, `read:org`, `read:user`).
+3. Copy the token.
+
+### Azure AI Foundry Project (for Agent Demo only)
+
+If you plan to use the Agent Demo:
+
+1. Create an [Azure AI Foundry](https://ai.azure.com) project.
+2. Deploy a **gpt-4o** model (or another supported model) in the project.
+3. Note the project endpoint URL from the project's **Overview** page.
+
+---
+
+## Deploy to Azure
+
+### 1. Register the required resource provider
+
+```shell
+az provider register --namespace Microsoft.App --wait
+```
+
+### 2. Log in and initialize
+
+```shell
+azd auth login
+azd init
+```
+
+### 3. Set environment variables
+
+Set the credentials for the Slack and Jira MCP server backends:
+
+```shell
+# Slack MCP Server
+azd env set SLACK_BOT_TOKEN <your-slack-bot-xoxb-token>
+
+# Jira MCP Server
+azd env set JIRA_URL <your-jira-instance-url>         # e.g. https://yourorg.atlassian.net
+azd env set JIRA_USERNAME <your-jira-email>
+azd env set JIRA_API_TOKEN <your-jira-api-token>
+```
+
+**All four variables are required.** If you skip them, the Slack/Jira Container Apps will deploy but fail to connect to their respective services.
+
+### 4. Deploy
+
+```shell
+azd up
+```
+
+This provisions all Azure resources and deploys the code. The output will display the APIM gateway URL and the three MCP SSE endpoints.
+
+### 5. Verify deployment
+
+After `azd up` completes, the output will show:
+
+```
+SERVICE_API_ENDPOINTS:
+  - https://<apim-name>.azure-api.net/mcp/sse
+  - https://<apim-name>.azure-api.net/slack-mcp/sse
+  - https://<apim-name>.azure-api.net/jira-mcp/sse
+```
+
+---
+
+## Test with MCP Inspector
+
+1. In a **new terminal**, install and run MCP Inspector:
 
     ```shell
     npx @modelcontextprotocol/inspector
     ```
 
-1. CTRL click to load the MCP Inspector web app from the URL displayed by the app (e.g. http://127.0.0.1:6274/#resources)
-1. Set the transport type to `SSE`
-1. Set the URL to one of the running API Management SSE endpoints displayed after `azd up` and **Connect**:
+2. CTRL-click to load the MCP Inspector web app from the URL displayed (e.g. `http://127.0.0.1:6274`).
+3. Set the transport type to **SSE**.
+4. Set the URL to one of the APIM SSE endpoints and click **Connect**:
 
     ```
-    https://<apim-servicename>.azure-api.net/mcp/sse        # MCP Functions
-    https://<apim-servicename>.azure-api.net/slack-mcp/sse   # Slack MCP
-    https://<apim-servicename>.azure-api.net/jira-mcp/sse    # Jira MCP
+    https://<apim-name>.azure-api.net/mcp/sse        # MCP Functions
+    https://<apim-name>.azure-api.net/slack-mcp/sse   # Slack MCP
+    https://<apim-name>.azure-api.net/jira-mcp/sse    # Jira MCP
     ```
 
-5. **List Tools**.  Click on a tool and **Run Tool**.
+5. Click **List Tools**, then select a tool and **Run Tool**.
 
 > **Note**: MCP Inspector's web UI will auto-discover the OAuth metadata at `/.well-known/oauth-authorization-server` and initiate the OAuth flow. You can also test directly using CLI mode:
 > ```shell
 > npx @modelcontextprotocol/inspector --cli --transport sse \
->   --server-url "https://<apim-servicename>.azure-api.net/jira-mcp/sse" \
+>   --server-url "https://<apim-name>.azure-api.net/jira-mcp/sse" \
 >   --method tools/list
 > ```
 
+---
+
+## Agent Demo
+
+The `agent-demo/` directory contains an interactive AI Foundry agent that connects to all four MCP backends as tools. The agent can query Slack channels, search Jira issues, browse GitHub repos, and use the sample MCP Functions tools — all from a single chat interface.
+
+See [`agent-demo/README.md`](agent-demo/README.md) for full setup instructions.
+
+### Quick Start
+
+```shell
+cd agent-demo
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with your AI Foundry project endpoint and APIM gateway URL
+python agent.py
+```
+
+### GitHub MCP Connection (required for GitHub tools)
+
+The GitHub MCP server is hosted remotely at `https://api.githubcopilot.com/mcp/` — no Container App or APIM proxy needed. Authentication uses a **Custom Keys** connection in AI Foundry:
+
+1. In Azure Portal or Foundry Portal, go to your AI Foundry project.
+2. Navigate to **Connected resources** → **+ New connection** → **Custom Keys**.
+3. Set **Credential name** to `Authorization` and **Credential value** to `Bearer <your-github-pat>`.
+4. Name the connection `github-mcp`.
+
+Or via CLI:
+
+```bash
+az rest --method put \
+  --url "https://management.azure.com<your-project-resource-id>/connections/github-mcp?api-version=2025-04-01-preview" \
+  --body '{
+    "properties": {
+      "authType": "CustomKeys",
+      "category": "CustomKeys",
+      "target": "https://api.githubcopilot.com/mcp/",
+      "isSharedToAll": true,
+      "credentials": {
+        "keys": {
+          "Authorization": "Bearer <your-github-pat>"
+        }
+      }
+    }
+  }'
+```
+
+> **Note**: The GitHub MCP connection is NOT provisioned by Bicep/`azd up`. It must be created manually in your AI Foundry project.
+
+---
+
+## OAuth and Agent Access
+
+The APIM gateway protects each MCP endpoint with OAuth 2.0 (Authorization Code + PKCE). This flow is designed for **interactive browser-based clients** like MCP Inspector or VS Code Copilot.
+
+The AI Foundry agent connects to MCP servers **server-side** and cannot perform a browser-based OAuth flow. For agent access, you have several options:
+
+1. **Disable OAuth validation in APIM policies** — Comment out the token validation block in the policy XML files. This is what the current deployment does (OAuth blocks are commented out in all three policy files).
+2. **Bypass APIM** — Point the agent directly at the Container App URLs instead of the APIM gateway.
+3. **Use APIM subscription keys** — Configure APIM to accept `Ocp-Apim-Subscription-Key` as an alternative auth mechanism.
+
+To **re-enable OAuth**, uncomment the authorization blocks in:
+- `infra/app/apim-mcp/mcp-api.policy.xml`
+- `infra/app/apim-slack-mcp/slack-mcp-api.policy.xml`
+- `infra/app/apim-jira-mcp/jira-mcp-api.policy.xml`
+
+---
 
 ## Technical Architecture Overview
 
@@ -348,3 +488,19 @@ The architecture is designed to be extensible. To add a new MCP server backend:
 4. **Add parameters** in `infra/main.bicep` and `infra/main.parameters.json` for any credentials or configuration values needed by the new backend.
 
 5. **Set environment variables** via `azd env set` for any secrets before running `azd up`.
+
+## Known Issues
+
+### Jira MCP Schema Compatibility with AI Foundry
+
+The `mcp-atlassian` Jira MCP server exposes 25 tools, but 9 of them use `anyOf`/`allOf` in their JSON Schema definitions which are not supported by the Azure AI Foundry agent SDK. The agent demo whitelists only the 16 compatible tools via the `allowed_tools` parameter on the `MCPTool` definition.
+
+**Compatible tools (16)**: `jira_search_issues`, `jira_list_projects`, `jira_list_statuses`, `jira_list_priorities`, `jira_get_transitions`, `jira_get_comments`, `jira_get_worklogs`, `jira_get_project`, `jira_list_sprints`, `jira_get_sprint`, `jira_get_board`, `jira_list_boards`, `jira_get_issue_link_types`, `jira_link_issues`, `jira_list_fields`, `jira_get_field`
+
+**Incompatible tools (9)**: `jira_get_issue`, `jira_create_issue`, `jira_update_issue`, `jira_transition_issue`, `jira_add_comment`, `jira_add_worklog`, `jira_create_sprint`, `jira_update_sprint`, `jira_batch_get_changelogs`
+
+**Workaround**: Use `jira_search_issues` with JQL (e.g. `key = PROJ-42`) instead of `jira_get_issue`.
+
+### Pyright Type Warning in Agent Demo
+
+The agent demo shows a persistent Pyright warning about `list[MCPTool]` not being assignable to `list[Tool]`. This is a known SDK typing issue (list invariance in Python) and works correctly at runtime.

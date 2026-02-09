@@ -165,6 +165,10 @@ module slackMcpContainerApp './core/host/container-app.bicep' = {
         name: 'SLACK_MCP_PORT'
         value: '3001'
       }
+      {
+        name: 'SLACK_MCP_ADD_MESSAGE_TOOL'
+        value: 'true'
+      }
     ]
   }
 }
